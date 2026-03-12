@@ -1013,92 +1013,146 @@ async function downloadCard() {
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 生成中';
 
   try {
-    const q   = TQ[lockedPos];   // 始终使用点击时的当前页
+    const q   = TQ[lockedPos];
     const dt  = fmtDate();
-    const SZ  = 1080;
+
+    // 2× 高清：2160px 输出
+    const SZ  = 2160;
     const cv  = document.createElement('canvas');
     cv.width  = cv.height = SZ;
     const ctx = cv.getContext('2d');
 
-    /* 1 background */
-    const b64 = await fetchB64(q.img);
-    if (b64) {
-      await new Promise(res => {
-        const im = new Image(); im.crossOrigin = 'anonymous';
-        im.onload = () => {
-          const sc = Math.max(SZ/im.width, SZ/im.height);
-          ctx.drawImage(im, (SZ-im.width*sc)/2, (SZ-im.height*sc)/2, im.width*sc, im.height*sc);
-          res();
-        };
-        im.onerror = res; im.src = b64;
-      });
-    } else { ctx.fillStyle='#111'; ctx.fillRect(0,0,SZ,SZ); }
+    // ── 所有尺寸常量按 2× 缩放 ──────────────────────────
+    const PAD  = 80;   // 内边距
+    const CM   = 64;   // 角标长度
+    const CO   = 52;   // 角标偏移
 
-    /* 2 vignette */
-    const rg1=ctx.createRadialGradient(SZ/2,SZ,0,SZ/2,SZ,SZ*0.72);
-    rg1.addColorStop(0,'rgba(0,0,0,0.88)'); rg1.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=rg1; ctx.fillRect(0,0,SZ,SZ);
-    const rg2=ctx.createRadialGradient(SZ/2,0,0,SZ/2,0,SZ*0.65);
-    rg2.addColorStop(0,'rgba(0,0,0,0.5)'); rg2.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=rg2; ctx.fillRect(0,0,SZ,SZ);
-    const lg=ctx.createLinearGradient(0,SZ*0.55,0,SZ);
-    lg.addColorStop(0,'rgba(5,5,5,0)'); lg.addColorStop(1,'rgba(5,5,5,0.82)');
-    ctx.fillStyle=lg; ctx.fillRect(0,0,SZ,SZ);
+    // ① 纯暗色精致背景（无图片）
+    // 基底深黑
+    ctx.fillStyle = '#080808';
+    ctx.fillRect(0, 0, SZ, SZ);
 
-    /* 3 corners */
-    const CO=26, CM=32;
-    ctx.strokeStyle='rgba(191,160,106,0.36)'; ctx.lineWidth=1.5;
-    [[CO,CO,1,1],[SZ-CO,CO,-1,1],[CO,SZ-CO,1,-1],[SZ-CO,SZ-CO,-1,-1]].forEach(([x,y,dx,dy])=>{
-      ctx.beginPath(); ctx.moveTo(x+dx*CM,y); ctx.lineTo(x,y); ctx.lineTo(x,y+dy*CM); ctx.stroke();
-    });
+    // 中心微弱暖晕 — 让画面不死黑
+    const gCenter = ctx.createRadialGradient(SZ*0.38, SZ*0.48, 0, SZ*0.38, SZ*0.48, SZ*0.72);
+    gCenter.addColorStop(0,   'rgba(191,160,106,0.055)');
+    gCenter.addColorStop(0.5, 'rgba(191,160,106,0.018)');
+    gCenter.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = gCenter;
+    ctx.fillRect(0, 0, SZ, SZ);
 
-    /* 4 ghost quote */
-    ctx.save(); ctx.font='800 370px Georgia,serif';
-    ctx.fillStyle='rgba(191,160,106,0.038)'; ctx.fillText('"',18,310); ctx.restore();
+    // 底部渐深
+    const gBottom = ctx.createLinearGradient(0, SZ*0.6, 0, SZ);
+    gBottom.addColorStop(0, 'rgba(0,0,0,0)');
+    gBottom.addColorStop(1, 'rgba(0,0,0,0.45)');
+    ctx.fillStyle = gBottom;
+    ctx.fillRect(0, 0, SZ, SZ);
 
-    /* 5 tag */
-    ctx.fillStyle='rgba(191,160,106,0.5)'; ctx.fillRect(CO+2,CO+5,18,1.5);
-    ctx.save(); ctx.font='400 21px "Courier New",monospace';
-    ctx.fillStyle='#BFA06A'; ctx.fillText(`DAY · ${String(daysSinceFirst(currentUser)).padStart(3,'0')}`,CO+28,CO+17); ctx.restore();
-
-    /* 6 date */
-    ctx.save(); ctx.font='400 19px "Courier New",monospace';
-    ctx.fillStyle='rgba(255,255,255,0.26)'; ctx.textAlign='right';
-    ctx.fillText(dt.full,SZ-CO,CO+14); ctx.fillText(dt.week.toUpperCase(),SZ-CO,CO+38);
-    ctx.textAlign='left'; ctx.restore();
-
-    /* 7 Chinese */
-    const cnSz = q.cn.length > 22 ? 37 : 44;
-    ctx.save(); ctx.font=`300 ${cnSz}px "Noto Serif SC","STSong","SimSun",serif`;
-    ctx.fillStyle='rgba(236,228,214,0.95)';
-    const cnLines = wrapCtx(ctx, q.cn, SZ-120);
-    const bodyTop = SZ * 0.36;
-    cnLines.forEach((l,i) => ctx.fillText(l, CO+2, bodyTop+i*cnSz*2.1));
+    // 细横线纹理（模拟纸张质感）
+    ctx.save();
+    ctx.globalAlpha = 0.022;
+    for (let y = 0; y < SZ; y += 4) {
+      ctx.fillStyle = y % 8 === 0 ? '#ffffff' : '#000000';
+      ctx.fillRect(0, y, SZ, 1);
+    }
     ctx.restore();
 
-    /* 8 English */
-    const enBase = cnSz > 38 ? 23 : 27;
-    const enY = bodyTop + cnLines.length*cnSz*2.1 + 22;
-    ctx.save(); ctx.font=`italic 700 ${enBase}px Georgia,"Times New Roman",serif`;
-    ctx.fillStyle='rgba(236,228,214,0.4)';
-    wrapCtx(ctx, `"${q.en}"`, SZ-120).forEach((l,i)=>{
-      ctx.save(); ctx.transform(1,-0.06,0,1,0,0); ctx.fillText(l,CO+2,enY+i*enBase*1.82); ctx.restore();
+    // ② 四角金色角标
+    ctx.strokeStyle = 'rgba(191,160,106,0.45)';
+    ctx.lineWidth = 2.5;
+    [[CO,CO,1,1],[SZ-CO,CO,-1,1],[CO,SZ-CO,1,-1],[SZ-CO,SZ-CO,-1,-1]].forEach(([x,y,dx,dy]) => {
+      ctx.beginPath();
+      ctx.moveTo(x + dx*CM, y);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x, y + dy*CM);
+      ctx.stroke();
     });
+
+    // ③ 巨型幽灵引号水印
+    ctx.save();
+    ctx.font = '900 740px Georgia, serif';
+    ctx.fillStyle = 'rgba(191,160,106,0.032)';
+    ctx.fillText('"', 36, 620);
     ctx.restore();
 
-    /* 9 divider */
-    const dY = SZ-152;
-    const gDiv=ctx.createLinearGradient(CO,0,SZ-CO,0);
-    gDiv.addColorStop(0,'rgba(191,160,106,0.38)'); gDiv.addColorStop(0.55,'rgba(255,255,255,0.05)'); gDiv.addColorStop(1,'rgba(255,255,255,0)');
-    ctx.strokeStyle=gDiv; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(CO,dY); ctx.lineTo(SZ-CO,dY); ctx.stroke();
+    // ④ 顶部标签：DAY · NNN
+    const dayNum = String(daysSinceFirst(currentUser)).padStart(3, '0');
+    ctx.fillStyle = 'rgba(191,160,106,0.55)';
+    ctx.fillRect(CO + 4, CO + 10, 36, 3);
+    ctx.save();
+    ctx.font = '400 42px "Courier New", monospace';
+    ctx.fillStyle = '#BFA06A';
+    ctx.fillText(`DAY · ${dayNum}`, CO + 50, CO + 36);
+    ctx.restore();
 
-    /* 10 author */
-    ctx.save(); ctx.font=`700 46px Georgia,serif`; ctx.fillStyle='rgba(236,228,214,0.94)'; ctx.fillText(q.author,CO+2,dY+56); ctx.restore();
-    ctx.save(); ctx.font=`400 19px "Courier New",monospace`; ctx.fillStyle='rgba(191,160,106,0.54)';
-    ctx.fillText(`${q.authorEn.toUpperCase()} · ${q.years} · ${q.country}`,CO+2,dY+86); ctx.restore();
-    ctx.save(); ctx.font=`400 18px "Courier New",monospace`; ctx.fillStyle='rgba(255,255,255,0.24)';
-    ctx.textAlign='right'; ctx.fillText(`— ${q.src}`,SZ-CO,dY+64); ctx.restore();
+    // ⑤ 右上角日期
+    ctx.save();
+    ctx.font = '400 36px "Courier New", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.textAlign = 'right';
+    ctx.fillText(dt.full,          SZ - CO, CO + 28);
+    ctx.fillText(dt.week.toUpperCase(), SZ - CO, CO + 72);
+    ctx.textAlign = 'left';
+    ctx.restore();
+
+    // ⑥ 中文语录
+    const cnMaxW  = SZ - PAD*2 - 40;
+    const cnSz    = q.cn.length > 20 ? 72 : 82;
+    const cnLH    = cnSz * 2.0;
+    ctx.save();
+    ctx.font = `300 ${cnSz}px "PingFang SC","Microsoft YaHei","Noto Serif SC",sans-serif`;
+    ctx.fillStyle = 'rgba(236,228,214,0.96)';
+    const cnLines = wrapCtx(ctx, q.cn, cnMaxW);
+    const bodyTop = SZ * 0.33;
+    cnLines.forEach((l, i) => ctx.fillText(l, PAD, bodyTop + i * cnLH));
+    ctx.restore();
+
+    // ⑦ 英文语录（无斜体、无变换，干净直立）
+    const enSz   = q.en.length > 60 ? 38 : 44;
+    const enLH   = enSz * 1.85;
+    const enMaxW = SZ - PAD*2 - 40;
+    const enTop  = bodyTop + cnLines.length * cnLH + 52;
+    ctx.save();
+    ctx.font = `400 ${enSz}px "Helvetica Neue","Arial","PingFang SC",sans-serif`;
+    ctx.fillStyle = 'rgba(236,228,214,0.38)';
+    const enLines = wrapCtx(ctx, `"${q.en}"`, enMaxW);
+    enLines.forEach((l, i) => ctx.fillText(l, PAD, enTop + i * enLH));
+    ctx.restore();
+
+    // ⑧ 分割线（金色渐隐）
+    const dY = SZ - 300;
+    const gDiv = ctx.createLinearGradient(PAD, 0, SZ - PAD, 0);
+    gDiv.addColorStop(0,    'rgba(191,160,106,0.5)');
+    gDiv.addColorStop(0.45, 'rgba(191,160,106,0.15)');
+    gDiv.addColorStop(1,    'rgba(191,160,106,0)');
+    ctx.strokeStyle = gDiv;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(PAD, dY);
+    ctx.lineTo(SZ - PAD, dY);
+    ctx.stroke();
+
+    // ⑨ 作者名（中文大字）
+    ctx.save();
+    ctx.font = `600 88px "PingFang SC","Microsoft YaHei","Noto Serif SC",sans-serif`;
+    ctx.fillStyle = 'rgba(236,228,214,0.95)';
+    ctx.fillText(q.author, PAD, dY + 106);
+    ctx.restore();
+
+    // ⑩ 作者英文 + 年份 + 国籍
+    ctx.save();
+    ctx.font = `400 36px "Courier New", monospace`;
+    ctx.fillStyle = 'rgba(191,160,106,0.6)';
+    ctx.fillText(`${q.authorEn.toUpperCase()} · ${q.years} · ${q.country}`, PAD, dY + 162);
+    ctx.restore();
+
+    // ⑪ 来源（右下）
+    ctx.save();
+    ctx.font = `400 34px "Courier New", monospace`;
+    ctx.fillStyle = 'rgba(255,255,255,0.26)';
+    ctx.textAlign = 'right';
+    ctx.fillText(`— ${q.src}`, SZ - CO, dY + 120);
+    ctx.textAlign = 'left';
+    ctx.restore();
 
     /* download */
     const a = document.createElement('a');
