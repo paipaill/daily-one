@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: daily-quote
+    env: static
+    # 构建时将占位符替换为环境变量中的真实 API Key
+    buildCommand: sed -i "s/__ZHIPU_API_KEY__/$ZHIPU_API_KEY/g" index.html
+    staticPublishPath: .
+    envVars:
+      - key: ZHIPU_API_KEY
+        sync: false   # 在 Render Dashboard 手动填写，不提交到 Git
