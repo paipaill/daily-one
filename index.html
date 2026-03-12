@@ -553,11 +553,27 @@ function todayKey() {
 function loadState() {
   if (!localStorage.getItem('dq_first'))
     localStorage.setItem('dq_first', String(Date.now()));
-  let s = JSON.parse(localStorage.getItem('dq_state') || 'null');
-  if (!s || s.date !== todayKey()) {
-    s = { date: todayKey(), pos: 0, done: false, dlCount: 0 };
+
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem('dq_state') || 'null'); } catch(e) { s = null; }
+
+  const today = todayKey();
+
+  // Always reset on a new day — no exceptions
+  if (!s || s.date !== today) {
+    s = { date: today, pos: 0, done: false, dlCount: 0 };
     saveState(s);
   }
+
+  // Safety: if somehow done leaked across days, force-reset
+  if (s.done && s.date !== today) {
+    s = { date: today, pos: 0, done: false, dlCount: 0 };
+    saveState(s);
+  }
+
+  // Clamp pos to valid range
+  s.pos = Math.max(0, Math.min(s.pos, DAILY_COUNT - 1));
+
   return s;
 }
 function saveState(s) { localStorage.setItem('dq_state', JSON.stringify(s)); }
@@ -681,9 +697,11 @@ function goToEnd() {
 
 /* ── download badge ── */
 function updateDlBadge() {
-  const rem = MAX_DL - (S.dlCount||0);
-  document.getElementById('dlLeft').textContent = `${rem}/${MAX_DL}`;
-  document.getElementById('dlBtn').disabled = rem<=0;
+  const rem   = MAX_DL - (S.dlCount||0);
+  const badge = document.getElementById('dlLeft');
+  const btn   = document.getElementById('dlBtn');
+  if (badge) badge.textContent = `${rem}/${MAX_DL}`;
+  if (btn && !btn._downloading) btn.disabled = rem <= 0;
 }
 
 /* ── COPY ── */
@@ -701,6 +719,7 @@ async function downloadCard() {
   if ((S.dlCount||0) >= MAX_DL) { showToast('今日下载已达上限'); return; }
 
   const btn = document.getElementById('dlBtn');
+  btn._downloading = true;   // flag so updateDlBadge won't touch disabled
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 生成中';
 
@@ -801,13 +820,17 @@ async function downloadCard() {
     a.download=`daily-quote-${dt.full.replace(/\./g,'-')}.png`;
     a.href=cv.toDataURL('image/png',1.0); a.click();
 
-    S.dlCount=(S.dlCount||0)+1; saveState(S); updateDlBadge();
-    showToast(`已保存到本地  今日剩余 ${MAX_DL-S.dlCount} 次`);
+    S.dlCount=(S.dlCount||0)+1; saveState(S);
+    const remaining = MAX_DL - S.dlCount;
+    showToast(`已保存到本地  今日剩余 ${remaining} 次`);
 
   } catch(e) { console.error(e); showToast('下载失败，请重试'); }
   finally {
+    // Restore button HTML first, THEN update badge so #dlLeft exists
+    btn._downloading = false;
     btn.innerHTML = '<i class="fas fa-download"></i> 下载 <span class="dl-left" id="dlLeft"></span>';
-    updateDlBadge();
+    btn.disabled = false;
+    updateDlBadge();   // now #dlLeft is in DOM, safe to call
   }
 }
 
@@ -852,8 +875,8 @@ function showToast(msg) {
   document.getElementById('hDate').textContent=`${dt.full} · ${dt.week}`;
   buildSteps();
 
-  if (S.done) {
-    // Already finished today — go straight to end
+  // Re-validate: only show end screen if done=true AND date is genuinely today
+  if (S.done && S.date === todayKey()) {
     document.getElementById('hdr').classList.add('hide');
     document.getElementById('scene').classList.add('hide');
     document.getElementById('bar').classList.add('hide');
@@ -862,9 +885,14 @@ function showToast(msg) {
     return;
   }
 
+  // If date mismatch slipped through, force fresh state
+  if (S.date !== todayKey()) {
+    S = { date: todayKey(), pos: 0, done: false, dlCount: 0 };
+    saveState(S);
+  }
+
   render(false);
 
-  // Keyboard: right arrow only (no back)
   document.addEventListener('keydown', e=>{
     if (S.done) return;
     if (e.key==='ArrowRight'||e.key==='ArrowDown') tryAdvance();
